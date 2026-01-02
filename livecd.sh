@@ -640,6 +640,8 @@ EOF
 [zram0]
 zram-size = ram / 2
 compression-algorithm = zstd
+swap-priority = 100
+fs-type = swap
 EOF
     success "ZRAM configured (50% RAM, zstd)"
     echo ""
