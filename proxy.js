@@ -4,7 +4,7 @@ export default {
     
     // ================= 配置区域 =================
     const GITHUB_USER = "0Sycamores";
-    const GITHUB_REPO = "sycamore-arch";
+    const GITHUB_REPO = "dotfiles";
     const BRANCH = "main";
     
     // 仓库主页 (跳转目标)
