@@ -1,0 +1,9 @@
+# --- 通用忽略 ---
+.git/
+.gitignore
+README.md
+LICENSE
+install.sh
+livecd.sh
+proxy.js
+wrangler.toml
