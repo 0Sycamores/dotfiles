@@ -15,10 +15,10 @@ export default {
 
     // 定义仅有的几个“合法”脚本路径
     const ROUTES = {
-      "/livecd":  "livecd.sh",
-      "/livecd.sh":  "livecd.sh",
-      "/install": "install.sh",
-      "/install.sh": "install.sh",
+      "/livecd":  ".config/arch-setup/livecd.sh",
+      "/livecd.sh":  ".config/arch-setup/livecd.sh",
+      "/setup": ".config/arch-setup/setup.sh",
+      "/setup.sh": ".config/arch-setup/setup.sh",
     };
     // ===========================================
 
