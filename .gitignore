@@ -1,17 +1,50 @@
-# 忽略所有文件，采用白名单模式
-/*
+# ==========================
+# 1. 忽略所有文件 (默认全拒绝)
+# ==========================
+*
 
-# 白名单：文件
-!/.gitignore
-!/README.md
-!/LICENSE
-!/.config/fish/config.fish
+# ==========================
+# 2. 但是！允许 Git 进入文件夹查看 (不做这步，子目录里的文件加不进去)
+# ==========================
+!*/
 
-# 白名单：目录
-!/.config/arch-setup/
+# ==========================
+# 3. 必须追踪 .gitignore 自己，否则这些规则不生效
+# ==========================
+!.gitignore
 
-# 忽略系统生成文件
-.DS_Store
-[Dd]esktop.ini
-$RECYCLE.BIN/
-Thumbs.db
+# ==========================
+# 4. 下面开始“放行”想要的配置
+# ==========================
+
+# 通用配置
+!.zshrc
+!.bashrc
+!.gitconfig
+
+# 整个文件夹放行
+!.config/arch-setup/*
+.config/arch-setup/.wrangler
+
+# 特定文件夹下的特定文件
+!.config/fish/config.fish
+!.config/dae/config.dae
+!.config/dae/example.dae
+
+# 管理脚本
+!.local/bin/livecd.sh
+!.dotfiles-meta/setup.sh
+
+# ==========================
+# 5. 处理 Bitwarden 和 敏感文件
+# ==========================
+# 即使上面有了 "*"，为了双重保险，建议显式列出
+# 并且确保模板文件被放行
+
+# 忽略真实生成的配置文件 (含密码)
+.config/v2ray/config.json
+.config/clash/config.yaml
+
+# 放行模板文件
+!.config/v2ray/config.json.template
+!.config/clash/config.yaml.template

@@ -193,6 +193,15 @@ EOF
 check_environment() {
     print_section_title "Environment Checks"
 
+    # 0. 检查用户身份
+    info "Checking user identity..."
+    if [[ $EUID -eq 0 ]]; then
+        error "This script must be run as a normal user, not root."
+        exit 1
+    else
+        success "Running as normal user: $(whoami)"
+    fi
+
     # 1. 检查发行版
     info "Checking distribution..."
     if [[ -f /etc/os-release ]] && grep -q "ID=arch" /etc/os-release; then
@@ -433,6 +442,283 @@ setup_snapper() {
     success "Initial snapshots verified"
 }
 
+# 设置全局默认编辑器
+setup_editor() {
+    print_section_title "Configuring Default Editor"
+
+    # 安装 nvim
+    if ! command -v nvim &> /dev/null; then
+        info "Neovim not found. Installing..."
+        run_command "Installing neovim" sudo pacman -S --noconfirm --needed neovim
+    fi
+
+    info "Setting global default editor to nvim..."
+    
+    local env_file="/etc/environment"
+    
+    # 设置 EDITOR 和 VISUAL
+    for var in EDITOR VISUAL; do
+        if grep -q "^${var}=" "$env_file"; then
+            info "${var} already set in ${env_file}, skipping override."
+        else
+            run_command "Adding ${var}" bash -c "echo '${var}=nvim' | sudo tee -a $env_file"
+        fi
+    done
+    
+    success "Global editor set to nvim"
+}
+
+
+# 开启 32 位源 (Multilib)
+enable_multilib() {
+    print_section_title "Enabling Multilib Repository"
+
+    if grep -q "^\[multilib\]" /etc/pacman.conf; then
+        info "Multilib repository already enabled."
+    else
+        info "Enabling multilib repository..."
+        # 取消注释 [multilib] 和紧随其后的 Include 行
+        # 这里的 sed 命令会查找从 [multilib] 到 Include 之间的行，并去掉行首的 #
+        if run_command "Modifying pacman.conf" sudo sed -i "/\[multilib\]/,/Include/"'s/^#//' /etc/pacman.conf; then
+            run_command "Syncing databases" sudo pacman -Syy
+            success "Multilib repository enabled"
+        else
+            error "Failed to enable multilib repository"
+        fi
+    fi
+}
+
+# 添加 Arch Linux CN 源
+setup_archlinuxcn() {
+    print_section_title "Adding Arch Linux CN Repository"
+
+    # 1. 创建 mirrorlist 文件
+    local cn_mirrorlist="/etc/pacman.d/archlinuxcn-mirrorlist"
+    
+    if [[ -f "$cn_mirrorlist" ]]; then
+        info "${cn_mirrorlist} already exists, skipping creation."
+    else
+        info "Creating ${cn_mirrorlist}..."
+        # 写入高质量国内源列表
+        sudo tee "$cn_mirrorlist" > /dev/null <<'EOF'
+## Arch Linux CN Mirrors
+Server = https://mirrors.ustc.edu.cn/archlinuxcn/$arch
+Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/$arch
+Server = https://mirrors.sjtug.sjtu.edu.cn/archlinuxcn/$arch
+Server = https://mirrors.aliyun.com/archlinuxcn/$arch
+EOF
+    fi
+
+    # 2. 配置 pacman.conf
+    local need_sync=false
+    
+    if grep -q "^\[archlinuxcn\]" /etc/pacman.conf; then
+        info "Arch Linux CN repository already enabled in pacman.conf."
+    else
+        info "Adding [archlinuxcn] to pacman.conf..."
+        # 追加配置到 pacman.conf，引用 mirrorlist 文件
+        run_command "Appending config to pacman.conf" bash -c "cat <<EOF | sudo tee -a /etc/pacman.conf
+
+[archlinuxcn]
+Include = ${cn_mirrorlist}
+EOF"
+        need_sync=true
+    fi
+        
+    # 3. 安装 keyring
+    if ! pacman -Qq archlinuxcn-keyring &> /dev/null; then
+        info "archlinuxcn-keyring is missing."
+        need_sync=true
+    fi
+    
+    if [[ "$need_sync" == "true" ]]; then
+        info "Syncing databases and installing keyring..."
+        # 先更新数据库以便 pacman 知道新仓库
+        run_command "Syncing databases" sudo pacman -Sy
+        
+        if run_command "Installing keyring" sudo pacman -S --noconfirm --needed archlinuxcn-keyring; then
+            success "Arch Linux CN repository added and keyring installed"
+        else
+            error "Failed to install archlinuxcn-keyring. You may need to manually fix keys."
+            return 1
+        fi
+    else
+        success "Arch Linux CN setup already complete"
+    fi
+}
+
+# 配置 dae 代理工具
+setup_dae() {
+    print_section_title "Configuring dae"
+
+    # 1. 检查是否已安装
+    if pacman -Qq dae &> /dev/null || pacman -Qq dae-avx2-bin &> /dev/null; then
+        success "dae is already installed."
+    else
+        info "Installing dae..."
+        
+        # 2. 检测 AVX2 支持以选择合适的包
+        local dae_pkg="dae"
+        if grep -q "avx2" /proc/cpuinfo; then
+             info "AVX2 instruction set detected. Using optimized package."
+             dae_pkg="dae-avx2-bin"
+        else
+             info "AVX2 not supported. Using standard package."
+        fi
+        
+        # 3. 安装包 (同时安装 daed)
+        if run_command "Installing ${dae_pkg} and daed" sudo pacman -S --noconfirm --needed "${dae_pkg}" daed; then
+            success "${dae_pkg} and daed installed"
+        else
+            error "Failed to install ${dae_pkg} or daed"
+            return 1
+        fi
+    fi
+
+    # TODO: 添加 rbw 从密码管理器拉取 节点 OR 从密码管理器拉去订阅链接？
+    
+
+    # 4. 启用服务
+    if ! systemctl is-active --quiet dae; then
+        info "Enabling dae service..."
+        run_command "Enabling dae service" sudo systemctl enable --now dae.service
+        success "dae service enabled"
+    else
+        success "dae service is already running"
+    fi
+
+    if ! systemctl is-active --quiet daed; then
+        info "Enabling daed service..."
+        run_command "Enabling daed service" sudo systemctl enable --now daed.service
+        success "daed service enabled"
+    else
+        success "daed service is already running"
+    fi
+}
+
+# 配置音视频固件和服务
+setup_av() {
+    print_section_title "Configuring Audio/Video Firmware & Services"
+
+    # 检查核心服务是否已运行
+    if systemctl --user is-active --quiet pipewire && \
+       systemctl --user is-active --quiet pipewire-pulse && \
+       systemctl --user is-active --quiet wireplumber; then
+        success "PipeWire services already running, skipping."
+        return 0
+    fi
+
+    info "Installing PipeWire stack and firmware..."
+    local packages=(
+        "pipewire"
+        "pipewire-alsa"
+        "pipewire-pulse"
+        "pipewire-jack"
+        "wireplumber"
+        "alsa-utils"
+        "sof-firmware"
+        "alsa-firmware"
+    )
+
+    if run_command "Installing packages" sudo pacman -S --noconfirm --needed "${packages[@]}"; then
+        info "Enabling PipeWire services..."
+        # 启用 PipeWire 相关用户服务
+        run_command "Enabling pipewire" systemctl --user enable --now pipewire
+        run_command "Enabling pipewire-pulse" systemctl --user enable --now pipewire-pulse
+        run_command "Enabling wireplumber" systemctl --user enable --now wireplumber
+        
+        success "Audio/Video firmware and services configured"
+    else
+        error "Failed to install Audio/Video packages"
+        return 1
+    fi
+}
+
+# 配置性能模式切换 (power-profiles-daemon)
+setup_power_management() {
+    print_section_title "Configuring Power Profiles"
+
+    # 检查服务是否已激活
+    if systemctl is-active --quiet power-profiles-daemon; then
+        success "power-profiles-daemon is already active."
+        return 0
+    fi
+
+    info "Installing power-profiles-daemon..."
+    if run_command "Installing package" sudo pacman -S --noconfirm --needed power-profiles-daemon; then
+        
+        # 为了防止冲突，禁用其他电源管理工具
+        for conflicting_service in tlp auto-cpufreq; do
+            if systemctl is-active --quiet "${conflicting_service}"; then
+                warn "${conflicting_service} detected. Disabling it to prevent conflicts..."
+                run_command "Disabling ${conflicting_service}" sudo systemctl disable --now "${conflicting_service}"
+            fi
+        done
+
+        run_command "Enabling service" sudo systemctl enable --now power-profiles-daemon.service
+        success "Power profiles daemon configured"
+    else
+        error "Failed to install power-profiles-daemon"
+        return 1
+    fi
+}
+
+# 配置蓝牙
+setup_bluetooth() {
+    print_section_title "Configuring Bluetooth"
+
+    # 检查服务是否已激活
+    if systemctl is-active --quiet bluetooth; then
+        success "Bluetooth service is already active."
+        return 0
+    fi
+
+    info "Installing bluez bluetui packages..."
+    if run_command "Installing bluez" sudo pacman -S --noconfirm --needed bluez bluetui; then
+        info "Enabling bluetooth service..."
+        run_command "Enabling service" sudo systemctl enable --now bluetooth.service
+        success "Bluetooth configured"
+    else
+        error "Failed to install bluetooth packages"
+        return 1
+    fi
+}
+
+# 配置 Flatpak
+setup_flatpak() {
+    print_section_title "Configuring Flatpak"
+
+    # 1. 检查是否安装
+    if ! command -v flatpak &> /dev/null; then
+        info "Installing flatpak..."
+        if ! run_command "Installing flatpak" sudo pacman -S --noconfirm --needed flatpak; then
+            error "Failed to install flatpak"
+            return 1
+        fi
+    else
+        info "Flatpak already installed"
+    fi
+
+    # 2. 添加 Flathub 及其国内镜像
+    info "Configuring Flathub remote..."
+    
+    # 检查是否已经添加了 flathub
+    if flatpak remote-list | grep -q "flathub"; then
+        info "Flathub remote already exists."
+    else
+        # 添加官方 flathub (作为基础)
+        run_command "Adding Flathub remote" sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    fi
+
+    # 3. 设置 SJTU 镜像 (提升国内下载速度)
+    # 修改 remote url 指向镜像
+    info "Setting Flathub mirror to SJTU..."
+    if run_command "Setting mirror" sudo flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub; then
+        success "Flatpak configured with SJTU mirror"
+    else
+        warn "Failed to set SJTU mirror, falling back to default"
+    fi
+}
 
 # ==============================================================================
 # 5. 主流程
@@ -444,7 +730,15 @@ main() {
     
     check_environment
     optimize_mirrors
+    enable_multilib
     setup_snapper
+    setup_editor
+    setup_archlinuxcn
+    setup_dae
+    setup_av
+    setup_power_management
+    setup_bluetooth
+    setup_flatpak
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
