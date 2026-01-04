@@ -5,9 +5,10 @@
 !/.gitignore
 !/README.md
 !/LICENSE
+!/.config/fish/config.fish
 
 # 白名单：目录
-!/.config/arch-setup
+!/.config/arch-setup/
 
 # 忽略系统生成文件
 .DS_Store
