@@ -104,7 +104,7 @@ run_command() {
     local description="${1:-Executing command}"
     shift
     local cmd=("$@")
-    local max_lines=5
+    local max_lines=15
     local line_count=0
     local buffer=()
     local exit_code=0
@@ -121,7 +121,7 @@ run_command() {
             continue
         fi
 
-        # 更新缓冲区（保留最后5行，截断超长行）
+        # 更新缓冲区
         if [[ ${#line} -gt 110 ]]; then
             buffer+=("${line:0:107}...")
         else
