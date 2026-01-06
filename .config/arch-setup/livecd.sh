@@ -461,7 +461,11 @@ install_base() {
 
     # 3. 安装常用工具 (引导、网络、编辑器等)
     info "Step 3/3: Installing additional tools..."
-    local extra_pkgs=(grub efibootmgr dosfstools networkmanager os-prober exfat-utils zram-generator fastfetch reflector)
+    local extra_pkgs=(
+        grub efibootmgr dosfstools networkmanager os-prober
+        zram-generator fastfetch reflector 
+        noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-jetbrains-mono-nerd
+    )
     run_command "Installing additional tools" pacstrap /mnt "${extra_pkgs[@]}"
     
     # 4. 检测虚拟化环境并安装增强工具
@@ -525,8 +529,10 @@ configure_users() {
     info "Step 2/2: Creating standard user..."
     local username=""
     while [[ -z "$username" ]]; do
-        echo -e -n "${PROMPT}Enter username: ${RESET}"
+        echo -e -n "${PROMPT}Enter username [sycamore]: ${RESET}"
         read -r input_user
+        input_user="${input_user:-sycamore}"
+
         if [[ "$input_user" =~ ^[a-z][a-z0-9_-]*$ ]]; then
             username="$input_user"
         else

@@ -236,10 +236,42 @@ check_environment() {
         exit 1
     fi
 
-    # 4. 检查 GitHub 连通性
+}
+
+# 检查 GitHub 连通性 (独立方法，支持代理)
+check_github_connection() {
+    print_section_title "GitHub Connection"
+
+    echo -e -n "${PROMPT}Do you want to configure a proxy? [y/N] ${RESET}"
+    read -r choice
+    # 回车默认选 N
+    choice=${choice:-N}
+
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        echo -e -n "${PROMPT}Enter proxy URL (e.g., 192.168.50.1:10808): ${RESET}"
+        read -r proxy_url
+        if [[ -n "$proxy_url" ]]; then
+            # 如果不包含协议头，默认添加 http://
+            if [[ ! "$proxy_url" =~ ^[a-zA-Z]+:// ]]; then
+                proxy_url="http://${proxy_url}"
+            fi
+            
+            export http_proxy="$proxy_url"
+            export https_proxy="$proxy_url"
+            export all_proxy="$proxy_url"
+            info "Proxy configured: $proxy_url"
+        else
+            warn "No proxy URL entered, skipping proxy configuration."
+        fi
+    else
+        info "Skipping proxy configuration."
+    fi
+
     local test_domain="github.com"
     info "Checking connectivity to ${test_domain}..."
-    if ping -c 1 -W 2 "${test_domain}" &> /dev/null; then
+    
+    # 使用 curl 测试连通性(支持代理)，回退到 ping
+    if curl -I --connect-timeout 5 -s "https://${test_domain}" >/dev/null || ping -c 1 -W 2 "${test_domain}" &> /dev/null; then
         GITHUB_AVAILABLE="true"
         success "GitHub connection is stable"
     else
@@ -547,55 +579,6 @@ EOF"
     fi
 }
 
-# 配置 dae 代理工具
-setup_dae() {
-    print_section_title "Configuring dae"
-
-    # 1. 检查是否已安装
-    if pacman -Qq dae &> /dev/null || pacman -Qq dae-avx2-bin &> /dev/null; then
-        success "dae is already installed."
-    else
-        info "Installing dae..."
-        
-        # 2. 检测 AVX2 支持以选择合适的包
-        local dae_pkg="dae"
-        if grep -q "avx2" /proc/cpuinfo; then
-             info "AVX2 instruction set detected. Using optimized package."
-             dae_pkg="dae-avx2-bin"
-        else
-             info "AVX2 not supported. Using standard package."
-        fi
-        
-        # 3. 安装包 (同时安装 daed)
-        if run_command "Installing ${dae_pkg} and daed" sudo pacman -S --noconfirm --needed "${dae_pkg}" daed; then
-            success "${dae_pkg} and daed installed"
-        else
-            error "Failed to install ${dae_pkg} or daed"
-            return 1
-        fi
-    fi
-
-    # TODO: 添加 rbw 从密码管理器拉取 节点 OR 从密码管理器拉去订阅链接？
-    
-
-    # 4. 启用服务
-    if ! systemctl is-active --quiet dae; then
-        info "Enabling dae service..."
-        run_command "Enabling dae service" sudo systemctl enable --now dae.service
-        success "dae service enabled"
-    else
-        success "dae service is already running"
-    fi
-
-    if ! systemctl is-active --quiet daed; then
-        info "Enabling daed service..."
-        run_command "Enabling daed service" sudo systemctl enable --now daed.service
-        success "daed service enabled"
-    else
-        success "daed service is already running"
-    fi
-}
-
 # 配置音视频固件和服务
 setup_av() {
     print_section_title "Configuring Audio/Video Firmware & Services"
@@ -729,12 +712,12 @@ main() {
     print_banner
     
     check_environment
+    check_github_connection
     optimize_mirrors
     enable_multilib
     setup_snapper
     setup_editor
     setup_archlinuxcn
-    setup_dae
     setup_av
     setup_power_management
     setup_bluetooth
