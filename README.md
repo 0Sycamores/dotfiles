@@ -6,4 +6,4 @@
 
 ```shell
 bash <(curl -fsSL arch.sycamore.icu/livecd)
-``` 
+```

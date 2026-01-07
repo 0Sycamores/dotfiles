@@ -535,6 +535,8 @@ EOF"
         info "Syncing databases and installing keyring..."
         # 先更新数据库以便 pacman 知道新仓库
         run_command "Syncing databases" sudo pacman -Sy
+        # 先确保官方 keyring 是最新的，避免签名验证问题
+        run_command "Updating archlinux-keyring" sudo pacman -S --noconfirm --needed archlinux-keyring
         
         if run_command "Installing keyring" sudo pacman -S --noconfirm --needed archlinuxcn-keyring; then
             success "Arch Linux CN repository added and keyring installed"
