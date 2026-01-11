@@ -44,7 +44,7 @@ SYSTEM_COUNTRY_CODE="CN"
 EFI_PART_SIZE="1024M"
 DEFAULT_HOSTNAME="archlinux"
 TIMEZONE="Asia/Shanghai"
-MOUNT_OPTS="noatime,compress=zstd:1,space_cache=v2"
+MOUNT_OPTS="noatime,compress=zstd"
 
 # ==============================================================================
 # 2. TUI 颜色与样式定义
@@ -405,6 +405,10 @@ setup_filesystems() {
     run_command "Creating @snapshots" btrfs subvolume create /mnt/@snapshots
     run_command "Creating @games" btrfs subvolume create /mnt/@games
     run_command "Disabling CoW (@games)" chattr +C /mnt/@games
+    run_command "Creating @movies" btrfs subvolume create /mnt/@movies
+    run_command "Disabling CoW (@movies)" chattr +C /mnt/@movies
+    run_command "Creating @downloads" btrfs subvolume create /mnt/@downloads
+    run_command "Disabling CoW (@downloads)" chattr +C /mnt/@downloads
     
     if mountpoint -q /mnt; then
         run_command "Unmounting root (tmp)" umount /mnt
@@ -555,8 +559,22 @@ configure_users() {
         run_command "Creating dir" mkdir -p "${games_dir}"
         run_command "Mounting @games" mount -o "${MOUNT_OPTS},subvol=@games" "${PART_ROOT}" "${games_dir}"
         run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Games"
+
+        # @movies 挂载
+        info "Mounting @movies to /home/${username}/Movies..."
+        local movies_dir="/mnt/home/${username}/Movies"
+        run_command "Creating dir" mkdir -p "${movies_dir}"
+        run_command "Mounting @movies" mount -o "${MOUNT_OPTS},subvol=@movies" "${PART_ROOT}" "${movies_dir}"
+        run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Movies"
+
+        # @downloads 挂载
+        info "Mounting @downloads to /home/${username}/Downloads..."
+        local downloads_dir="/mnt/home/${username}/Downloads"
+        run_command "Creating dir" mkdir -p "${downloads_dir}"
+        run_command "Mounting @downloads" mount -o "${MOUNT_OPTS},subvol=@downloads" "${PART_ROOT}" "${downloads_dir}"
+        run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Downloads"
         
-        success "User configured and @games mounted"
+        success "User configured and extra subvolumes (@games, @movies, @downloads) mounted"
     else
         error "Failed to create user"
     fi
@@ -690,6 +708,9 @@ install_bootloader() {
     # 安装 GRUB 到 ESP
     run_command "Installing GRUB to EFI" arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/efi --boot-directory=/efi --bootloader-id=Arch
     
+    # 创建 /boot/grub 符号链接以兼容默认路径检测
+    run_command "Symlinking /boot/grub" arch-chroot /mnt ln -sf /efi/grub /boot/grub
+
     # 生成 GRUB 配置
     run_command "Generating GRUB config" arch-chroot /mnt grub-mkconfig -o /efi/grub/grub.cfg
     
