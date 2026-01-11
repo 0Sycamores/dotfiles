@@ -166,6 +166,94 @@ run_command() {
     return ${exit_code}
 }
 
+# 带快照保护的任务执行器
+# 用法: run_with_snapshot "步骤名称" 命令 [参数...]
+run_with_snapshot() {
+    local step_name="$1"
+    shift
+    local cmd=("$@")
+    
+    # 定义快照描述标记
+    local pre_desc="Pre ${step_name}"
+    local post_desc="Post ${step_name}"
+    
+    info "Checking snapshot state for '${step_name}'..."
+    
+    # 获取现有的 root 配置快照列表
+    local snap_list
+    if ! snap_list=$(sudo snapper -c root list --columns number,description 2>/dev/null); then
+        warn "Snapper not configured or failed to list. Running command without snapshot protection."
+        "${cmd[@]}"
+        return $?
+    fi
+    
+    # 提取快照 ID (取最后匹配的一个)
+    local pre_id
+    pre_id=$(echo "$snap_list" | grep "${pre_desc}" | awk '{print $1}' | tail -n 1)
+    local post_id
+    post_id=$(echo "$snap_list" | grep "${post_desc}" | awk '{print $1}' | tail -n 1)
+    
+    # --- 情况 A: 任务已完成 ---
+    if [[ -n "$pre_id" && -n "$post_id" ]]; then
+        success "Step '${step_name}' already completed (Snapshots #${pre_id} & #${post_id}). Skipping."
+        return 0
+        
+    # --- 情况 B: 上次任务未完成 (只有前置快照) ---
+    elif [[ -n "$pre_id" ]]; then
+        warn "Incomplete execution detected for '${step_name}' (Found Pre-snapshot #${pre_id} but no Post-snapshot)."
+        
+        echo -e -n "${PROMPT}Do you want to restore the pre-installation snapshot? [y/N] ${RESET}"
+        read -r choice
+        choice=${choice:-N}
+        
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            info "Restoring snapshot #${pre_id}..."
+            
+            # 使用 undochange 恢复差异 (将当前系统状态 0 恢复为 snapshot ID 的状态)
+            # 注意：这需要文件系统处于可写状态
+            if run_command "Restoring system state" sudo snapper -c root undochange "${pre_id}..0"; then
+                success "System restored to state before '${step_name}'."
+                
+                echo -e -n "${PROMPT}Reboot system now? [Y/n] ${RESET}"
+                read -r reboot_choice
+                reboot_choice=${reboot_choice:-Y}
+                
+                if [[ "$reboot_choice" =~ ^[Yy]$ ]]; then
+                    info "Rebooting..."
+                    sudo reboot
+                else
+                    info "Please manually reboot or restart the script."
+                    exit 0
+                fi
+            else
+                error "Failed to restore snapshot."
+                exit 1
+            fi
+        else
+            info "Skipping pre-snapshot creation, retrying installation..."
+            # 直接执行命令，成功后补创建后置快照
+            if "${cmd[@]}"; then
+                run_command "Creating post-snapshot" sudo snapper -c root create --description "${post_desc}"
+            else
+                error "Step '${step_name}' failed during retry."
+                return 1
+            fi
+        fi
+        
+    # --- 情况 C: 正常执行 (无快照记录) ---
+    else
+        run_command "Creating pre-snapshot" sudo snapper -c root create --description "${pre_desc}"
+        
+        if "${cmd[@]}"; then
+            run_command "Creating post-snapshot" sudo snapper -c root create --description "${post_desc}"
+        else
+            error "Step '${step_name}' failed."
+            # 失败时不创建后置快照，这样下次运行就会进入"情况 B"
+            return 1
+        fi
+    fi
+}
+
 
 # ==============================================================================
 # 4. 主要功能模块
@@ -718,12 +806,11 @@ main() {
     optimize_mirrors
     enable_multilib
     setup_snapper
-    setup_editor
-    setup_archlinuxcn
-    setup_av
-    setup_power_management
-    setup_bluetooth
-    setup_flatpak
+    run_with_snapshot "Setup Editor" setup_editor
+    run_with_snapshot "Setup ArchLinuxCN" setup_archlinuxcn
+    run_with_snapshot "Setup AV" setup_av
+    run_with_snapshot "Setup Bluetooth" setup_bluetooth
+    run_with_snapshot "Setup Flatpak" setup_flatpak
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
