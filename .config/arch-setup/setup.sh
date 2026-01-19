@@ -68,7 +68,7 @@ fi
 
 # 输出信息日志
 info() {
-    echo -e "${INFO}[INFO]${RESET} $*"
+    echo -e "${INFO}[   INFO]${RESET} $*"
 }
 
 # 输出成功日志
@@ -83,7 +83,7 @@ warn() {
 
 # 输出错误日志
 error() {
-    echo -e "${ERROR}[ERROR]${RESET} $*" >&2
+    echo -e "${ERROR}[  ERROR]${RESET} $*" >&2
 }
 
 # 处理中断信号 (Ctrl+C)
