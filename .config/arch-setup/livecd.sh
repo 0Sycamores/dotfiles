@@ -405,8 +405,8 @@ setup_filesystems() {
     run_command "Creating @snapshots" btrfs subvolume create /mnt/@snapshots
     run_command "Creating @games" btrfs subvolume create /mnt/@games
     run_command "Disabling CoW (@games)" chattr +C /mnt/@games
-    run_command "Creating @movies" btrfs subvolume create /mnt/@movies
-    run_command "Disabling CoW (@movies)" chattr +C /mnt/@movies
+    run_command "Creating @videos" btrfs subvolume create /mnt/@videos
+    run_command "Disabling CoW (@videos)" chattr +C /mnt/@videos
     run_command "Creating @downloads" btrfs subvolume create /mnt/@downloads
     run_command "Disabling CoW (@downloads)" chattr +C /mnt/@downloads
     
@@ -560,12 +560,12 @@ configure_users() {
         run_command "Mounting @games" mount -o "${MOUNT_OPTS},subvol=@games" "${PART_ROOT}" "${games_dir}"
         run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Games"
 
-        # @movies 挂载
-        info "Mounting @movies to /home/${username}/Movies..."
-        local movies_dir="/mnt/home/${username}/Movies"
-        run_command "Creating dir" mkdir -p "${movies_dir}"
-        run_command "Mounting @movies" mount -o "${MOUNT_OPTS},subvol=@movies" "${PART_ROOT}" "${movies_dir}"
-        run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Movies"
+        # @videos 挂载
+        info "Mounting @videos to /home/${username}/Videos..."
+        local videos_dir="/mnt/home/${username}/Videos"
+        run_command "Creating dir" mkdir -p "${videos_dir}"
+        run_command "Mounting @videos" mount -o "${MOUNT_OPTS},subvol=@videos" "${PART_ROOT}" "${videos_dir}"
+        run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Videos"
 
         # @downloads 挂载
         info "Mounting @downloads to /home/${username}/Downloads..."
@@ -574,7 +574,7 @@ configure_users() {
         run_command "Mounting @downloads" mount -o "${MOUNT_OPTS},subvol=@downloads" "${PART_ROOT}" "${downloads_dir}"
         run_command "Setting perms" arch-chroot /mnt chown "${username}:${username}" "/home/${username}/Downloads"
         
-        success "User configured and extra subvolumes (@games, @movies, @downloads) mounted"
+        success "User configured and extra subvolumes (@games, @videos, @downloads) mounted"
     else
         error "Failed to create user"
     fi
