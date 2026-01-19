@@ -83,7 +83,7 @@ fi
 
 # 输出信息日志
 info() {
-    echo -e "${INFO}[INFO]${RESET} $*"
+    echo -e "${   INFO}[INFO]${RESET} $*"
 }
 
 # 输出成功日志
