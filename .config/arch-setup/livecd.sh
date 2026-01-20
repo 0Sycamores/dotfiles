@@ -418,14 +418,14 @@ setup_filesystems() {
     # 2. 挂载
     info "Step 2/2: Mounting filesystems..."
     run_command "Mounting @ (/mnt)" mount -o "${MOUNT_OPTS},subvol=@" "${PART_ROOT}" /mnt
-    run_command "Creating dirs" mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,efi}
+    run_command "Creating dirs" mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,boot}
     
     run_command "Mounting @home" mount -o "${MOUNT_OPTS},subvol=@home" "${PART_ROOT}" /mnt/home
     run_command "Mounting @log" mount -o "${MOUNT_OPTS},subvol=@log" "${PART_ROOT}" /mnt/var/log
     run_command "Mounting @pkg" mount -o "${MOUNT_OPTS},subvol=@pkg" "${PART_ROOT}" /mnt/var/cache/pacman/pkg
     run_command "Mounting @snapshots" mount -o "${MOUNT_OPTS},subvol=@snapshots" "${PART_ROOT}" /mnt/.snapshots
     
-    run_command "Mounting EFI" mount "${PART_EFI}" /mnt/efi
+    run_command "Mounting EFI" mount "${PART_EFI}" /mnt/boot
     
     success "Filesystems ready"
     echo ""
@@ -466,7 +466,7 @@ install_base() {
     # 3. 安装常用工具 (引导、网络、编辑器等)
     info "Step 3/3: Installing additional tools..."
     local extra_pkgs=(
-        grub efibootmgr dosfstools networkmanager os-prober
+        efibootmgr dosfstools networkmanager plymouth
         zram-generator fastfetch reflector 
         noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-jetbrains-mono-nerd
     )
@@ -669,52 +669,50 @@ fs-type = swap
 EOF
     success "ZRAM configured (50% RAM, zstd)"
     echo ""
+
+    # 6. 配置 Plymouth 钩子
+    info "Adding Plymouth to mkinitcpio hooks..."
+    # 确保在 udev 之后添加 plymouth
+    sed -i 's/^HOOKS=(base udev/HOOKS=(base udev plymouth/' /mnt/etc/mkinitcpio.conf
+    run_command "Regenerating initramfs with Plymouth" arch-chroot /mnt mkinitcpio -P
+    echo ""
 }
 
-
-
-# 安装并配置 GRUB 引导加载程序
+# 安装并配置 systemd-boot 引导加载程序与 Plymouth 动画
 install_bootloader() {
-    print_section_title "Bootloader Installation"
+    print_section_title "Bootloader Installation (systemd-boot)"
     
-    info "Configuring and installing GRUB..."
-    
-    # 检查 GRUB 配置
-    if [[ ! -f /mnt/etc/default/grub ]]; then
-        error "GRUB configuration file not found at /mnt/etc/default/grub!"
-        error "This indicates that the GRUB package was not installed correctly."
-        exit 1
-    fi
+    info "Installing systemd-boot..."
+    # 1. 初始化 systemd-boot
+    run_command "Installing bootctl" arch-chroot /mnt bootctl install
 
-    info "Configuring /etc/default/grub..."
-    
-    # 1. 启用多系统探测
-    sed -i 's/^#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /mnt/etc/default/grub
-    if ! grep -q "GRUB_DISABLE_OS_PROBER=false" /mnt/etc/default/grub; then
-            echo "GRUB_DISABLE_OS_PROBER=false" >> /mnt/etc/default/grub
-    fi
-    
-    # 2. 记忆上次启动项
-    sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /mnt/etc/default/grub
-    if ! grep -q "GRUB_SAVEDEFAULT=true" /mnt/etc/default/grub; then
-            echo "GRUB_SAVEDEFAULT=true" >> /mnt/etc/default/grub
-    fi
-    
-    # 3. 优化内核参数 (日志级别、禁用看门狗、禁用 zswap)
-    # 注意：Arch 默认启用了 zswap，这里通过内核参数显式禁用，因为我们将使用 zram-generator
-    # 使用整行替换以确保参数正确且不重复
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=0 loglevel=5 nowatchdog modprobe.blacklist=iTCO_wdt,sp5100_tco"/' /mnt/etc/default/grub
-    
-    # 安装 GRUB 到 ESP
-    run_command "Installing GRUB to EFI" arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/efi --boot-directory=/efi --bootloader-id=Arch
-    
-    # 创建 /boot/grub 符号链接以兼容默认路径检测
-    run_command "Symlinking /boot/grub" arch-chroot /mnt ln -sf /efi/grub /boot/grub
+    # 2. 配置 loader.conf
+    info "Configuring loader.conf..."
+    cat > /mnt/boot/loader/loader.conf <<EOF
+default arch.conf
+timeout 0
+console-mode max
+editor no
+EOF
 
-    # 生成 GRUB 配置
-    run_command "Generating GRUB config" arch-chroot /mnt grub-mkconfig -o /efi/grub/grub.cfg
+    # 3. 创建启动条目 arch.conf
+    local root_uuid=$(blkid -s UUID -o value "${PART_ROOT}")
     
-    success "Bootloader installed successfully"
+    info "Creating Arch Linux boot entry..."
+    cat > /mnt/boot/loader/entries/arch.conf <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux-zen
+initrd  /intel-ucode.img
+initrd  /amd-ucode.img
+initrd  /initramfs-linux-zen.img
+options root=UUID=${root_uuid} rw rootflags=subvol=@ zswap.enabled=0 loglevel=3 quiet splash vt.global_cursor_default=0 rd.udev.log_level=3 rd.vconsole.log_level=3
+EOF
+    
+    # 4. 配置 Plymouth (启动动画使用 bgrt 主题以显示主板 Logo)
+    info "Configuring Plymouth theme..."
+    run_command "Setting Plymouth theme" arch-chroot /mnt plymouth-set-default-theme -R bgrt
+    
+    success "Bootloader and Splash configured successfully"
     echo ""
 }
 
