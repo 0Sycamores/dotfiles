@@ -696,15 +696,32 @@ editor no
 EOF
 
     # 3. 创建启动条目 arch.conf
-    local root_uuid=$(blkid -s UUID -o value "${PART_ROOT}")
-    
+    local root_uuid
+    root_uuid="$(blkid -s UUID -o value "${PART_ROOT}")"
+
+    # systemd-boot：如果 entry 中引用了不存在的 initrd，会直接报错并中止引导。
+    # 因此这里根据实际安装到 ESP(/mnt/boot) 的微码镜像动态生成 initrd 列表。
+    local initrd_lines=()
+    if [[ -f /mnt/boot/intel-ucode.img ]]; then
+        initrd_lines+=("initrd  /intel-ucode.img")
+    fi
+    if [[ -f /mnt/boot/amd-ucode.img ]]; then
+        initrd_lines+=("initrd  /amd-ucode.img")
+    fi
+    initrd_lines+=("initrd  /initramfs-linux-zen.img")
+
+    local initrd_block
+    initrd_block="$(printf '%s\n' "${initrd_lines[@]}")"
+    # 去掉最后一个换行，避免 heredoc 中出现多余空行
+    initrd_block="${initrd_block%$'\n'}"
+
+    mkdir -p /mnt/boot/loader/entries
+
     info "Creating Arch Linux boot entry..."
     cat > /mnt/boot/loader/entries/arch.conf <<EOF
 title   Arch Linux
 linux   /vmlinuz-linux-zen
-initrd  /intel-ucode.img
-initrd  /amd-ucode.img
-initrd  /initramfs-linux-zen.img
+${initrd_block}
 options root=UUID=${root_uuid} rw rootflags=subvol=@ zswap.enabled=0 loglevel=3 quiet splash vt.global_cursor_default=0 rd.udev.log_level=3 rd.vconsole.log_level=3
 EOF
     
