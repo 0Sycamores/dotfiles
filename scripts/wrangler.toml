@@ -1,0 +1,8 @@
+name = "sycamore-arch-proxy"
+main = "proxy.js"
+compatibility_date = "2024-01-01"
+
+# 绑定唯一的 arch 域名
+routes = [
+  { pattern = "arch.sycamore.icu", custom_domain = true }
+]
