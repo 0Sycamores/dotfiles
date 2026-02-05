@@ -42,7 +42,7 @@ TARGET_USER=""
 # 配置项
 SYSTEM_COUNTRY_CODE="CN"
 EFI_PART_SIZE="1024M"
-DEFAULT_HOSTNAME="archlinux"
+DEFAULT_HOSTNAME="yukino"
 TIMEZONE="Asia/Shanghai"
 MOUNT_OPTS="noatime,compress=zstd"
 
