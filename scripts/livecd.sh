@@ -124,71 +124,47 @@ print_section_title() {
     echo -e "${HEADER}[SECTION]${RESET} ${BOLD_WHITE}${title}${RESET}"
 }
 
-# 执行命令并显示带有缓冲区的输出，处理错误
 run_command() {
     local description="${1:-Executing command}"
     shift
-    local cmd=("$@")
-    local max_lines=15
-    local line_count=0
-    local buffer=()
-    local exit_code=0
+    local -a cmd=("$@")
 
     info "${description}..."
     echo -e "${DIM}> ${cmd[*]}${RESET}"
 
-    # 使用 Process Substitution 和协议流来避免子 shell 变量丢失问题
-    # 并在流末尾附加退出码
-    while IFS= read -r line; do
-        # 检查是否为注入的退出码标记
-        if [[ "$line" =~ ^___EXIT_CODE:([0-9]+)$ ]]; then
-            exit_code="${BASH_REMATCH[1]}"
-            continue
-        fi
+    local tmp rc
+    tmp="$(mktemp -t arch-inst.XXXXXX)"
 
-        # 更新缓冲区
-        if [[ ${#line} -gt 110 ]]; then
-            buffer+=("${line:0:107}...")
-        else
-            buffer+=("$line")
-        fi
-        
-        if [[ ${#buffer[@]} -gt ${max_lines} ]]; then
-            buffer=("${buffer[@]:1}")
-        fi
+    # 关键：我们要自己处理失败，所以临时关掉 set -e
+    set +e
 
-        # 清除旧输出
-        if [[ ${line_count} -gt 0 ]]; then
-            for ((i=0; i<line_count; i++)); do
-                echo -ne "\033[1A\033[2K"
-            done
-        fi
-
-        # 显示缓冲区内容
-        line_count=${#buffer[@]}
-        for output_line in "${buffer[@]}"; do
-            echo -e "${DIM}  │ ${output_line}${RESET}"
-        done
-    done < <( "${cmd[@]}" 2>&1; echo "___EXIT_CODE:$?" )
-
-    # 清除最后显示的 TUI 缓冲区
-    if [[ ${line_count} -gt 0 ]]; then
-        for ((i=0; i<line_count; i++)); do
-            echo -ne "\033[1A\033[2K"
-        done
-    fi
-
-    if [[ ${exit_code} -eq 0 ]]; then
-        success "${description} completed"
+    if [[ -t 1 ]]; then
+        # 实时输出 + 记录日志；合并 stderr -> stdout，避免乱序
+        stdbuf -oL -eL "${cmd[@]}" 2>&1 \
+            | tee "$tmp" \
+            | sed -u 's/^/  │ /'
+        rc=${PIPESTATUS[0]}
     else
-        error "${description} failed (exit code: ${exit_code})"
-        # 失败时重新显示最后捕获的日志，方便调试
-        for output_line in "${buffer[@]}"; do
-            echo -e "${DIM}  │ ${output_line}${RESET}"
-        done
+        # 非 TTY（重定向/日志环境）就别玩花活，保证纯净输出
+        "${cmd[@]}" >"$tmp" 2>&1
+        rc=$?
+        cat "$tmp"
     fi
 
-    return ${exit_code}
+    set -e
+    # ——到这里 rc 一定可靠
+
+    if (( rc == 0 )); then
+        success "${description} completed"
+        rm -f "$tmp"
+        return 0
+    fi
+
+    error "${description} failed (exit code: $rc)"
+    warn "Last 40 lines:"
+    tail -n 40 "$tmp" | sed 's/^/  │ /'
+    rm -f "$tmp"
+    return "$rc"
 }
 
 # ==============================================================================
