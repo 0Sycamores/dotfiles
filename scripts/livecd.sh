@@ -129,43 +129,76 @@ run_command() {
     shift
     local -a cmd=("$@")
 
+    local max_lines=15
+    local line_count=0
+    local -a buffer=()
+    local exit_code=""   # 不要默认 0，避免“没拿到 token 也成功”
+    local token="___EXIT_CODE_${RANDOM}_${RANDOM}:"
+    local is_tty=0
+    [[ -t 1 ]] && is_tty=1
+
     info "${description}..."
     echo -e "${DIM}> ${cmd[*]}${RESET}"
 
-    local tmp rc
-    tmp="$(mktemp -t arch-inst.XXXXXX)"
+    while IFS= read -r line; do
+        if [[ "$line" == "${token}"* ]]; then
+            exit_code="${line#${token}}"
+            continue
+        fi
 
-    # 关键：我们要自己处理失败，所以临时关掉 set -e
-    set +e
+        # 更新缓冲区
+        if [[ ${#line} -gt 110 ]]; then
+            buffer+=("${line:0:107}...")
+        else
+            buffer+=("$line")
+        fi
+        if (( ${#buffer[@]} > max_lines )); then
+            buffer=("${buffer[@]:1}")
+        fi
 
-    if [[ -t 1 ]]; then
-        # 实时输出 + 记录日志；合并 stderr -> stdout，避免乱序
-        stdbuf -oL -eL "${cmd[@]}" 2>&1 \
-            | tee "$tmp" \
-            | sed -u 's/^/  │ /'
-        rc=${PIPESTATUS[0]}
-    else
-        # 非 TTY（重定向/日志环境）就别玩花活，保证纯净输出
-        "${cmd[@]}" >"$tmp" 2>&1
-        rc=$?
-        cat "$tmp"
+        # 仅在 TTY 下做回滚刷新
+        if (( is_tty )); then
+            if (( line_count > 0 )); then
+                for ((i=0; i<line_count; i++)); do
+                    echo -ne "\033[1A\033[2K"
+                done
+            fi
+
+            line_count=${#buffer[@]}
+            for output_line in "${buffer[@]}"; do
+                echo -e "${DIM}  │ ${output_line}${RESET}"
+            done
+        fi
+    done < <(
+        set +e
+        "${cmd[@]}" 2>&1
+        printf '%s%d\n' "$token" $?
+    )
+
+    # 清掉最后的 buffer 显示
+    if (( is_tty )) && (( line_count > 0 )); then
+        for ((i=0; i<line_count; i++)); do
+            echo -ne "\033[1A\033[2K"
+        done
     fi
 
-    set -e
-    # ——到这里 rc 一定可靠
+    # 兜底：没拿到退出码就当失败
+    if [[ ! "$exit_code" =~ ^[0-9]+$ ]]; then
+        exit_code=1
+    fi
 
-    if (( rc == 0 )); then
+    if (( exit_code == 0 )); then
         success "${description} completed"
-        rm -f "$tmp"
-        return 0
+    else
+        error "${description} failed (exit code: ${exit_code})"
+        for output_line in "${buffer[@]}"; do
+            echo -e "${DIM}  │ ${output_line}${RESET}"
+        done
     fi
 
-    error "${description} failed (exit code: $rc)"
-    warn "Last 40 lines:"
-    tail -n 40 "$tmp" | sed 's/^/  │ /'
-    rm -f "$tmp"
-    return "$rc"
+    return "$exit_code"
 }
+
 
 # ==============================================================================
 # 4. 通用辅助函数
